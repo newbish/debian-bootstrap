@@ -3,15 +3,18 @@ set -euo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 bash -n "$repo_root/bin/bootstrap-debian.sh"
+bash -n "$repo_root/bin/install.sh"
 tic -x -c "$repo_root/terminfo/xterm-ghostty.terminfo" >/dev/null
 
 root="$(mktemp -d)"
 custom_root=""
 config_root=""
 password_root=""
+installer_root=""
 custom_config=""
 stub_dir=""
-trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"}' EXIT
+installer_archive=""
+trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${installer_root:+"$installer_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"} ${installer_archive:+"$installer_archive"}' EXIT
 mkdir -p "$root/etc" "$root/home"
 printf 'root:x:0:0:root:/root:/bin/bash\n' > "$root/etc/passwd"
 printf 'root:*:19000:0:99999:7:::\n' > "$root/etc/shadow"
@@ -83,5 +86,19 @@ missing_status=$?
 set -e
 test "$missing_status" -ne 0
 grep -q "User 'missing' does not exist" "$password_root/missing.err"
+
+installer_root="$(mktemp -d)"
+installer_archive="$(mktemp --suffix=.tar.gz)"
+mkdir -p "$installer_root/etc" "$installer_root/home"
+printf 'root:x:0:0:root:/root:/bin/bash\n' > "$installer_root/etc/passwd"
+printf 'root:*:19000:0:99999:7:::\n' > "$installer_root/etc/shadow"
+printf 'root:x:0:\n' > "$installer_root/etc/group"
+tar --exclude=.git --exclude=.agents --exclude=skills-lock.json -czf "$installer_archive" -C "$repo_root" .
+
+REPO_ARCHIVE_URL="file://$installer_archive" "$repo_root/bin/install.sh" --target-root "$installer_root" --skip-packages --user frank
+
+grep -q '^frank:' "$installer_root/etc/passwd"
+grep -q '^sudo:.*frank' "$installer_root/etc/group"
+test -f "$installer_root/usr/local/share/terminfo-src/xterm-ghostty.terminfo"
 
 echo "static and staged-root tests passed"

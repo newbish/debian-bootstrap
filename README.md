@@ -18,6 +18,24 @@ Personal baseline scripts for configuring Debian systems the way Keith likes the
 
 This repository is public, so it can be cloned directly onto the target system.
 
+Fast path from a fresh Debian system:
+
+```bash
+apt-get update
+apt-get install -y curl ca-certificates
+curl -fsSL https://raw.githubusercontent.com/newbish/debian-bootstrap/main/bin/install.sh | bash
+```
+
+Pass normal bootstrap options after `bash -s --`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/newbish/debian-bootstrap/main/bin/install.sh | bash -s -- --user alice --set-password
+```
+
+The installer downloads the full repository archive, so bundled files like Ghostty terminfo are available without installing `git`.
+
+Clone path:
+
 ```bash
 apt-get update
 apt-get install -y git ca-certificates
