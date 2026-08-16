@@ -1,0 +1,3 @@
+# Copy to config/local.conf and set your preferred local account.
+# config/local.conf is intentionally ignored by git.
+CONFIG_USER=your_username_here
