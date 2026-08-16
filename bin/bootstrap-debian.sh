@@ -289,6 +289,10 @@ install_ghostty_terminfo() {
 
   if [[ "$TARGET_ROOT" == "/" ]]; then
     need_root_for_live_changes
+    if command -v infocmp >/dev/null 2>&1 && infocmp -x xterm-ghostty >/dev/null 2>&1 && infocmp -x ghostty >/dev/null 2>&1; then
+      echo "Ghostty terminfo already installed; skipping."
+      return 0
+    fi
     command -v tic >/dev/null 2>&1 || { echo "tic is required; install ncurses-bin." >&2; exit 1; }
     tic -x -o /usr/share/terminfo "$TERMINFO_SOURCE"
     return 0

@@ -5,6 +5,8 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n "$repo_root/bin/bootstrap-debian.sh"
 bash -n "$repo_root/bin/install.sh"
 tic -x -c "$repo_root/terminfo/xterm-ghostty.terminfo" >/dev/null
+grep -q 'Ghostty terminfo already installed; skipping.' "$repo_root/bin/bootstrap-debian.sh"
+grep -q 'infocmp -x xterm-ghostty' "$repo_root/bin/bootstrap-debian.sh"
 
 root="$(mktemp -d)"
 custom_root=""
