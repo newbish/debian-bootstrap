@@ -14,7 +14,8 @@ installer_root=""
 custom_config=""
 stub_dir=""
 installer_archive=""
-trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${installer_root:+"$installer_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"} ${installer_archive:+"$installer_archive"}' EXIT
+path_root=""
+trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${installer_root:+"$installer_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"} ${installer_archive:+"$installer_archive"} ${path_root:+"$path_root"}' EXIT
 mkdir -p "$root/etc" "$root/home"
 printf 'root:x:0:0:root:/root:/bin/bash\n' > "$root/etc/passwd"
 printf 'root:*:19000:0:99999:7:::\n' > "$root/etc/shadow"
@@ -119,5 +120,15 @@ REPO_ARCHIVE_URL="file://$installer_archive" "$repo_root/bin/install.sh" --targe
 
 grep -q '^grace:' "$installer_root/etc/passwd"
 grep -q '^sudo:.*grace' "$installer_root/etc/group"
+
+grep -q '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' "$repo_root/bin/bootstrap-debian.sh"
+path_root="$(mktemp -d)"
+mkdir -p "$path_root/etc" "$path_root/home"
+printf 'root:x:0:0:root:/root:/bin/bash\n' > "$path_root/etc/passwd"
+printf 'root:*:19000:0:99999:7:::\n' > "$path_root/etc/shadow"
+printf 'root:x:0:\n' > "$path_root/etc/group"
+PATH="/usr/bin:/bin" "$repo_root/bin/bootstrap-debian.sh" --target-root "$path_root" --skip-packages --user heidi
+grep -q '^heidi:' "$path_root/etc/passwd"
+grep -q '^sudo:.*heidi' "$path_root/etc/group"
 
 echo "static and staged-root tests passed"

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Minimal Debian/root shells may omit administrative paths. Commands like
+# useradd/usermod live in /usr/sbin, so make them available before doing work.
+export PATH="${PATH:+$PATH:}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 usage() {
   cat <<'USAGE'
 Usage: bootstrap-debian.sh [options]
