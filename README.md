@@ -99,6 +99,9 @@ CONFIG_USER=alice ./bin/bootstrap-debian.sh
 # Create/configure the user, then interactively set its password
 ./bin/bootstrap-debian.sh --user alice --set-password
 
+# Enable passwordless sudo for an existing user
+./bin/enable-passwordless-sudo.sh --user alice
+
 # Validate file-writing behavior against a staged root without running apt
 ./bin/bootstrap-debian.sh --target-root /tmp/debian-root --skip-packages
 ```
@@ -108,6 +111,9 @@ CONFIG_USER=alice ./bin/bootstrap-debian.sh
 - Run as `root` inside the target Debian system for live configuration.
 - Newly created users have locked passwords by default. Use `--set-password` or run
   `passwd USER` afterward when password login is desired.
+- Passwordless sudo is intentionally a separate explicit step. It writes a single
+  `/etc/sudoers.d/90-USER-nopasswd` drop-in and validates it with `visudo` when
+  available.
 - The script is idempotent: rerunning it should not duplicate sudo group membership or PATH entries.
 - For non-live staged roots, the script writes the Ghostty terminfo source to
   `/usr/local/share/terminfo-src/xterm-ghostty.terminfo`; run the script live in

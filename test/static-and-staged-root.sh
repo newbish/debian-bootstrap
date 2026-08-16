@@ -4,6 +4,7 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 bash -n "$repo_root/bin/bootstrap-debian.sh"
 bash -n "$repo_root/bin/install.sh"
+bash -n "$repo_root/bin/enable-passwordless-sudo.sh"
 tic -x -c "$repo_root/terminfo/xterm-ghostty.terminfo" >/dev/null
 grep -q 'Ghostty terminfo already installed; skipping.' "$repo_root/bin/bootstrap-debian.sh"
 grep -q 'infocmp -x xterm-ghostty' "$repo_root/bin/bootstrap-debian.sh"
@@ -17,7 +18,8 @@ custom_config=""
 stub_dir=""
 installer_archive=""
 path_root=""
-trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${installer_root:+"$installer_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"} ${installer_archive:+"$installer_archive"} ${path_root:+"$path_root"}' EXIT
+nopasswd_root=""
+trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${installer_root:+"$installer_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"} ${installer_archive:+"$installer_archive"} ${path_root:+"$path_root"} ${nopasswd_root:+"$nopasswd_root"}' EXIT
 mkdir -p "$root/etc" "$root/home"
 printf 'root:x:0:0:root:/root:/bin/bash\n' > "$root/etc/passwd"
 printf 'root:*:19000:0:99999:7:::\n' > "$root/etc/shadow"
@@ -132,5 +134,24 @@ printf 'root:x:0:\n' > "$path_root/etc/group"
 PATH="/usr/bin:/bin" "$repo_root/bin/bootstrap-debian.sh" --target-root "$path_root" --skip-packages --user heidi
 grep -q '^heidi:' "$path_root/etc/passwd"
 grep -q '^sudo:.*heidi' "$path_root/etc/group"
+
+nopasswd_root="$(mktemp -d)"
+mkdir -p "$nopasswd_root/etc/sudoers.d" "$nopasswd_root/etc"
+printf 'ivan:x:1000:1000:ivan:/home/ivan:/bin/bash\n' > "$nopasswd_root/etc/passwd"
+printf 'root:x:0:\nsudo:x:27:\n' > "$nopasswd_root/etc/group"
+
+"$repo_root/bin/enable-passwordless-sudo.sh" --target-root "$nopasswd_root" --user ivan
+"$repo_root/bin/enable-passwordless-sudo.sh" --target-root "$nopasswd_root" --user ivan
+
+grep -q '^ivan ALL=(ALL:ALL) NOPASSWD:ALL$' "$nopasswd_root/etc/sudoers.d/90-ivan-nopasswd"
+test "$(grep -c '^ivan ALL=(ALL:ALL) NOPASSWD:ALL$' "$nopasswd_root/etc/sudoers.d/90-ivan-nopasswd")" -eq 1
+test "$(stat -c '%a' "$nopasswd_root/etc/sudoers.d/90-ivan-nopasswd")" = "440"
+
+set +e
+"$repo_root/bin/enable-passwordless-sudo.sh" --target-root "$nopasswd_root" --user missing >"$nopasswd_root/nopasswd-missing.out" 2>"$nopasswd_root/nopasswd-missing.err"
+nopasswd_missing_status=$?
+set -e
+test "$nopasswd_missing_status" -ne 0
+grep -q "User 'missing' does not exist" "$nopasswd_root/nopasswd-missing.err"
 
 echo "static and staged-root tests passed"
