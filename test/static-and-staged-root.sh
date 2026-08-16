@@ -8,8 +8,10 @@ tic -x -c "$repo_root/terminfo/xterm-ghostty.terminfo" >/dev/null
 root="$(mktemp -d)"
 custom_root=""
 config_root=""
+password_root=""
 custom_config=""
-trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${custom_config:+"$custom_config"}' EXIT
+stub_dir=""
+trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"}' EXIT
 mkdir -p "$root/etc" "$root/home"
 printf 'root:x:0:0:root:/root:/bin/bash\n' > "$root/etc/passwd"
 printf 'root:*:19000:0:99999:7:::\n' > "$root/etc/shadow"
@@ -55,5 +57,31 @@ grep -q '^carol:' "$config_root/etc/passwd"
 grep -q '^dave:' "$config_root/etc/passwd"
 grep -q '^sudo:.*carol' "$config_root/etc/group"
 grep -q '^sudo:.*dave' "$config_root/etc/group"
+
+password_root="$(mktemp -d)"
+stub_dir="$(mktemp -d)"
+mkdir -p "$password_root/etc" "$password_root/home"
+printf 'root:x:0:0:root:/root:/bin/bash\n' > "$password_root/etc/passwd"
+printf 'root:*:19000:0:99999:7:::\n' > "$password_root/etc/shadow"
+printf 'root:x:0:\n' > "$password_root/etc/group"
+cat > "$stub_dir/passwd" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "${PASSWD_STUB_LOG:?}"
+STUB
+chmod +x "$stub_dir/passwd"
+
+set +e
+PASSWD_STUB_LOG="$password_root/passwd.log" PATH="$stub_dir:$PATH" "$repo_root/bin/bootstrap-debian.sh" --target-root "$password_root" --skip-packages --set-password --user erin
+password_status=$?
+set -e
+test "$password_status" -eq 0
+grep -q '^erin$' "$password_root/passwd.log"
+
+set +e
+"$repo_root/bin/bootstrap-debian.sh" --target-root "$password_root" --skip-packages --set-password --no-create-user --user missing >"$password_root/missing.out" 2>"$password_root/missing.err"
+missing_status=$?
+set -e
+test "$missing_status" -ne 0
+grep -q "User 'missing' does not exist" "$password_root/missing.err"
 
 echo "static and staged-root tests passed"

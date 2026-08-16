@@ -21,10 +21,11 @@ Options:
   --target-root DIR    root filesystem to modify (default: /)
   --skip-packages      do not run apt-get; useful for tests or pre-baked images
   --no-create-user     fail if USER does not exist instead of creating it
+  --set-password       run passwd for USER after account setup; interactive on live systems
   -h, --help           show this help
 
 Environment overrides:
-  CONFIG_USER=USER, TARGET_ROOT=DIR, SKIP_PACKAGES=1, CREATE_USER=0, CONFIG_FILE=FILE
+  CONFIG_USER=USER, TARGET_ROOT=DIR, SKIP_PACKAGES=1, CREATE_USER=0, SET_PASSWORD=1, CONFIG_FILE=FILE
 USAGE
 }
 
@@ -36,12 +37,14 @@ ENV_CONFIG_USER="${CONFIG_USER-}"
 ENV_TARGET_ROOT="${TARGET_ROOT-}"
 ENV_SKIP_PACKAGES="${SKIP_PACKAGES-}"
 ENV_CREATE_USER="${CREATE_USER-}"
+ENV_SET_PASSWORD="${SET_PASSWORD-}"
 
 CONFIG_FILE="${CONFIG_FILE:-$REPO_ROOT/config/default.conf}"
 CONFIG_USER="debian"
 TARGET_ROOT="/"
 SKIP_PACKAGES="0"
 CREATE_USER="1"
+SET_PASSWORD="0"
 
 # Pre-parse --config and --help so config defaults can be loaded before final option parsing.
 args=("$@")
@@ -74,6 +77,7 @@ fi
 [[ -n "$ENV_TARGET_ROOT" ]] && TARGET_ROOT="$ENV_TARGET_ROOT"
 [[ -n "$ENV_SKIP_PACKAGES" ]] && SKIP_PACKAGES="$ENV_SKIP_PACKAGES"
 [[ -n "$ENV_CREATE_USER" ]] && CREATE_USER="$ENV_CREATE_USER"
+[[ -n "$ENV_SET_PASSWORD" ]] && SET_PASSWORD="$ENV_SET_PASSWORD"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,6 +86,7 @@ while [[ $# -gt 0 ]]; do
     --target-root) TARGET_ROOT="${2:?--target-root requires a value}"; shift 2 ;;
     --skip-packages) SKIP_PACKAGES=1; shift ;;
     --no-create-user) CREATE_USER=0; shift ;;
+    --set-password) SET_PASSWORD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -215,6 +220,20 @@ configure_visudo_editor() {
   fi
 }
 
+set_user_password_if_requested() {
+  [[ "$SET_PASSWORD" == "1" ]] || return 0
+
+  if [[ "$TARGET_ROOT" == "/" ]]; then
+    need_root_for_live_changes
+  elif ! grep -qE "^${CONFIG_USER}:" "$(in_target /etc/passwd)"; then
+    echo "User '$CONFIG_USER' does not exist in target root; cannot set password." >&2
+    exit 1
+  fi
+
+  command -v passwd >/dev/null 2>&1 || { echo "passwd command is required to set a password." >&2; exit 1; }
+  passwd "$CONFIG_USER"
+}
+
 configure_global_sbin_path() {
   local profile_file environment_file
   profile_file="$(in_target /etc/profile.d/00-sbin-path.sh)"
@@ -285,6 +304,7 @@ main() {
   install_packages
   ensure_group
   ensure_user
+  set_user_password_if_requested
   configure_visudo_editor
   configure_global_sbin_path
   install_ghostty_terminfo

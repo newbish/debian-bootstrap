@@ -42,6 +42,7 @@ cd /tmp/debian-bootstrap
 --target-root DIR    root filesystem to modify; default: /
 --skip-packages      skip apt-get package installation
 --no-create-user     fail if USER does not exist instead of creating it
+--set-password       run passwd for USER after account setup
 ```
 
 Configuration precedence:
@@ -77,6 +78,9 @@ CONFIG_USER=alice ./bin/bootstrap-debian.sh
 # Use a different config file, still allowing command-line override
 ./bin/bootstrap-debian.sh --config ./my-bootstrap.conf --user alice
 
+# Create/configure the user, then interactively set its password
+./bin/bootstrap-debian.sh --user alice --set-password
+
 # Validate file-writing behavior against a staged root without running apt
 ./bin/bootstrap-debian.sh --target-root /tmp/debian-root --skip-packages
 ```
@@ -84,6 +88,8 @@ CONFIG_USER=alice ./bin/bootstrap-debian.sh
 ## Notes
 
 - Run as `root` inside the target Debian system for live configuration.
+- Newly created users have locked passwords by default. Use `--set-password` or run
+  `passwd USER` afterward when password login is desired.
 - The script is idempotent: rerunning it should not duplicate sudo group membership or PATH entries.
 - For non-live staged roots, the script writes the Ghostty terminfo source to
   `/usr/local/share/terminfo-src/xterm-ghostty.terminfo`; run the script live in
