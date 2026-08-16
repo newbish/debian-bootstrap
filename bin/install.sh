@@ -79,7 +79,7 @@ extract_archive() {
 
 find_repo_root() {
   local candidate
-  candidate="$(find "$WORK_DIR" -mindepth 1 -maxdepth 2 -type f -path '*/bin/bootstrap-debian.sh' -print -quit)"
+  candidate="$(find "$WORK_DIR" -type f -path '*/bin/bootstrap-debian.sh' -print -quit)"
   [[ -n "$candidate" ]] || { echo "Downloaded archive did not contain bin/bootstrap-debian.sh" >&2; exit 1; }
   dirname "$(dirname "$candidate")"
 }

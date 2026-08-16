@@ -101,4 +101,23 @@ grep -q '^frank:' "$installer_root/etc/passwd"
 grep -q '^sudo:.*frank' "$installer_root/etc/group"
 test -f "$installer_root/usr/local/share/terminfo-src/xterm-ghostty.terminfo"
 
+rm -rf "$installer_root"
+installer_root="$(mktemp -d)"
+rm -f "$installer_archive"
+installer_archive="$(mktemp --suffix=.tar.gz)"
+mkdir -p "$installer_root/etc" "$installer_root/home"
+printf 'root:x:0:0:root:/root:/bin/bash\n' > "$installer_root/etc/passwd"
+printf 'root:*:19000:0:99999:7:::\n' > "$installer_root/etc/shadow"
+printf 'root:x:0:\n' > "$installer_root/etc/group"
+github_archive_root="$(mktemp -d)"
+mkdir -p "$github_archive_root/debian-bootstrap-main"
+tar --exclude=.git --exclude=.agents --exclude=skills-lock.json -C "$repo_root" -cf - . | tar -C "$github_archive_root/debian-bootstrap-main" -xf -
+tar -czf "$installer_archive" -C "$github_archive_root" debian-bootstrap-main
+rm -rf "$github_archive_root"
+
+REPO_ARCHIVE_URL="file://$installer_archive" "$repo_root/bin/install.sh" --target-root "$installer_root" --skip-packages --user grace
+
+grep -q '^grace:' "$installer_root/etc/passwd"
+grep -q '^sudo:.*grace' "$installer_root/etc/group"
+
 echo "static and staged-root tests passed"
