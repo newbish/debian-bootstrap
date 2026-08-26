@@ -106,6 +106,85 @@ CONFIG_USER=alice ./bin/bootstrap-debian.sh
 ./bin/bootstrap-debian.sh --target-root /tmp/debian-root --skip-packages
 ```
 
+
+## Passwordless sudo / root access
+
+Passwordless root access is intentionally handled as a separate, explicit step from the baseline bootstrap. The bootstrap can create/configure a user and add it to the `sudo` group; `enable-passwordless-sudo.sh` then grants that existing user passwordless sudo by writing a dedicated sudoers drop-in.
+
+> This does **not** enable direct root login. It allows the named user to run `sudo` without being prompted for a password.
+
+Fast path from a fresh Debian system after bootstrap:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/newbish/debian-bootstrap/main/bin/install.sh | bash -s -- --user alice
+curl -fsSL https://raw.githubusercontent.com/newbish/debian-bootstrap/main/bin/enable-passwordless-sudo.sh | bash -s -- --user alice
+```
+
+Clone path:
+
+```bash
+apt-get update
+apt-get install -y git ca-certificates
+cd /tmp
+git clone https://github.com/newbish/debian-bootstrap.git
+cd debian-bootstrap
+./bin/bootstrap-debian.sh --user alice
+./bin/enable-passwordless-sudo.sh --user alice
+```
+
+If the user already exists and you only want to enable passwordless sudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/newbish/debian-bootstrap/main/bin/enable-passwordless-sudo.sh | bash -s -- --user alice
+```
+
+The script writes:
+
+```text
+/etc/sudoers.d/90-alice-nopasswd
+```
+
+with:
+
+```text
+alice ALL=(ALL:ALL) NOPASSWD:ALL
+```
+
+It validates the drop-in with `visudo` when running against the live system and `visudo` is available.
+
+### Staged-root usage
+
+For tests, images, or mounted filesystems, point the script at a target root:
+
+```bash
+./bin/bootstrap-debian.sh --target-root /tmp/debian-root --skip-packages --user alice
+./bin/enable-passwordless-sudo.sh --target-root /tmp/debian-root --user alice
+```
+
+This writes the sudoers drop-in under:
+
+```text
+/tmp/debian-root/etc/sudoers.d/90-alice-nopasswd
+```
+
+### Verify
+
+After running live on the target system:
+
+```bash
+su - alice
+sudo -n true
+sudo -n whoami
+```
+
+Expected result:
+
+```text
+root
+```
+
+If `sudo -n true` exits non-zero, passwordless sudo is not active for that user.
+
 ## Notes
 
 - Run as `root` inside the target Debian system for live configuration.
