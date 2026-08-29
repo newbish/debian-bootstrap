@@ -13,6 +13,7 @@ Personal baseline scripts for configuring Debian systems the way Keith likes the
   - `/etc/profile.d/00-sbin-path.sh`
   - `/etc/environment`
 - Installs Ghostty terminfo globally as `xterm-ghostty` / `ghostty`.
+- Includes an explicit disk-add helper that defaults to mounting `/dev/sdb` at `/home/agent`.
 
 ## Quick start on a Debian system
 
@@ -102,6 +103,12 @@ CONFIG_USER=alice ./bin/bootstrap-debian.sh
 # Enable passwordless sudo for an existing user
 ./bin/enable-passwordless-sudo.sh --user alice
 
+# Add the default extra disk and mount it at /home/agent
+./bin/add-disk.sh
+
+# Add a different disk or mount point
+./bin/add-disk.sh --device /dev/sdc --mount-point /srv/data
+
 # Validate file-writing behavior against a staged root without running apt
 ./bin/bootstrap-debian.sh --target-root /tmp/debian-root --skip-packages
 ```
@@ -184,6 +191,77 @@ root
 ```
 
 If `sudo -n true` exits non-zero, passwordless sudo is not active for that user.
+
+## Add and mount an extra disk
+
+`bin/add-disk.sh` partitions an available disk, creates a filesystem on the first partition, and adds it to `/etc/fstab`. By default it uses `/dev/sdb` and mounts `/dev/sdb1` at `/home/agent`.
+
+> Warning: the script rewrites the selected disk's partition table with a single Linux partition before formatting it as `ext4`. Use `--no-format` when you want the script to fail instead of creating a filesystem on the partition.
+
+Fast path for the default `/dev/sdb` → `/home/agent` setup:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/newbish/debian-bootstrap/main/bin/add-disk.sh | bash
+```
+
+Clone path:
+
+```bash
+apt-get update
+apt-get install -y git ca-certificates
+cd /tmp
+git clone https://github.com/newbish/debian-bootstrap.git
+cd debian-bootstrap
+./bin/add-disk.sh
+```
+
+Common options:
+
+```bash
+# Use a different device
+./bin/add-disk.sh --device /dev/sdc
+
+# Use a different mount point
+./bin/add-disk.sh --mount-point /srv/data
+
+# Refuse to format an empty partition
+./bin/add-disk.sh --no-format
+
+# Continue even if the disk or one of its partitions appears mounted
+./bin/add-disk.sh --force
+
+# Update fstab but skip mounting during this run
+./bin/add-disk.sh --no-mount
+```
+
+Safety behavior:
+
+- Allows `/dev/sda` when explicitly requested; the OS is not always installed on the first enumerated disk.
+- Warns before rewriting the selected disk's partition table, then creates one Linux partition.
+- Refuses to partition a disk that appears to be mounted unless `--force` is supplied.
+- Checks `/etc/fstab` before changing anything. If the device, first partition, mount point, or detected UUID is already listed, it exits without adding a duplicate.
+- Writes the fstab entry using `UUID=...`, not the raw `/dev/sdX` name.
+- Uses `defaults,nofail` so boot does not hang if the extra disk is temporarily unavailable.
+
+The default fstab entry looks like this:
+
+```text
+UUID=<partition-uuid> /home/agent ext4 defaults,nofail 0 2
+```
+
+### Staged-root usage
+
+For image builds or tests, point the script at a mounted root filesystem:
+
+```bash
+./bin/add-disk.sh --target-root /tmp/debian-root --device /dev/sdb --mount-point /home/agent
+```
+
+With `--target-root`, the fstab file is written under the target root, but the fstab mount point remains the path as it should appear inside the target system:
+
+```text
+/tmp/debian-root/etc/fstab contains: UUID=<partition-uuid> /home/agent ext4 defaults,nofail 0 2
+```
 
 ## Notes
 
