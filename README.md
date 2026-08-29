@@ -240,6 +240,7 @@ Safety behavior:
 - Warns before rewriting the selected disk's partition table, then creates one Linux partition.
 - Refuses to partition a disk that appears to be mounted unless `--force` is supplied.
 - Checks `/etc/fstab` before changing anything. If the device, first partition, mount point, or detected UUID is already listed, it exits without adding a duplicate.
+- Copies any existing files from the mount-point directory onto the new filesystem before the final mount.
 - Writes the fstab entry using `UUID=...`, not the raw `/dev/sdX` name.
 - Uses `defaults,nofail` so boot does not hang if the extra disk is temporarily unavailable.
 
