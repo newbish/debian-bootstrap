@@ -5,6 +5,7 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 bash -n "$repo_root/bin/bootstrap-debian.sh"
 bash -n "$repo_root/bin/install.sh"
 bash -n "$repo_root/bin/enable-passwordless-sudo.sh"
+bash -n "$repo_root/bin/add-disk.sh"
 tic -x -c "$repo_root/terminfo/xterm-ghostty.terminfo" >/dev/null
 grep -q 'Ghostty terminfo already installed; skipping.' "$repo_root/bin/bootstrap-debian.sh"
 grep -q 'infocmp -x xterm-ghostty' "$repo_root/bin/bootstrap-debian.sh"
@@ -19,7 +20,9 @@ stub_dir=""
 installer_archive=""
 path_root=""
 nopasswd_root=""
-trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${installer_root:+"$installer_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"} ${installer_archive:+"$installer_archive"} ${path_root:+"$path_root"} ${nopasswd_root:+"$nopasswd_root"}' EXIT
+disk_root=""
+disk_stub_dir=""
+trap 'rm -rf "$root" ${custom_root:+"$custom_root"} ${config_root:+"$config_root"} ${password_root:+"$password_root"} ${installer_root:+"$installer_root"} ${custom_config:+"$custom_config"} ${stub_dir:+"$stub_dir"} ${installer_archive:+"$installer_archive"} ${path_root:+"$path_root"} ${nopasswd_root:+"$nopasswd_root"} ${disk_root:+"$disk_root"} ${disk_stub_dir:+"$disk_stub_dir"}' EXIT
 mkdir -p "$root/etc" "$root/home"
 printf 'root:x:0:0:root:/root:/bin/bash\n' > "$root/etc/passwd"
 printf 'root:*:19000:0:99999:7:::\n' > "$root/etc/shadow"
@@ -153,5 +156,92 @@ nopasswd_missing_status=$?
 set -e
 test "$nopasswd_missing_status" -ne 0
 grep -q "User 'missing' does not exist" "$nopasswd_root/nopasswd-missing.err"
+
+disk_root="$(mktemp -d)"
+disk_stub_dir="$(mktemp -d)"
+mkdir -p "$disk_root/etc" "$disk_stub_dir" "$disk_root/dev"
+: > "$disk_root/etc/fstab"
+: > "$disk_root/dev/sdb"
+cat > "$disk_stub_dir/lsblk" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"-no TYPE /tmp"*) printf 'disk\n' ;;
+  *"-no FSTYPE /tmp"*) printf '\n' ;;
+  *"-no MOUNTPOINT /tmp"*) printf '\n' ;;
+  *) printf 'unexpected lsblk args: %s\n' "$*" >&2; exit 9 ;;
+esac
+STUB
+cat > "$disk_stub_dir/blkid" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"-s UUID -o value /tmp"*sdb1) printf '1111-2222\n' ;;
+  *"-s UUID -o value /tmp"*sda1) printf '3333-4444\n' ;;
+  *"-s UUID -o value /tmp"*) printf '\n' ;;
+  *) printf 'unexpected blkid args: %s\n' "$*" >&2; exit 9 ;;
+esac
+STUB
+cat > "$disk_stub_dir/sfdisk" <<'STUB'
+#!/usr/bin/env bash
+printf 'sfdisk %s\n' "$*" >> "${DISK_STUB_LOG:?}"
+cat >/dev/null
+: > "${1}1"
+STUB
+cat > "$disk_stub_dir/partprobe" <<'STUB'
+#!/usr/bin/env bash
+printf 'partprobe %s\n' "$*" >> "${DISK_STUB_LOG:?}"
+STUB
+cat > "$disk_stub_dir/udevadm" <<'STUB'
+#!/usr/bin/env bash
+printf 'udevadm %s\n' "$*" >> "${DISK_STUB_LOG:?}"
+STUB
+cat > "$disk_stub_dir/mkfs.ext4" <<'STUB'
+#!/usr/bin/env bash
+printf 'mkfs.ext4 %s\n' "$*" >> "${DISK_STUB_LOG:?}"
+STUB
+cat > "$disk_stub_dir/mount" <<'STUB'
+#!/usr/bin/env bash
+printf 'mount %s\n' "$*" >> "${DISK_STUB_LOG:?}"
+STUB
+chmod +x "$disk_stub_dir/lsblk" "$disk_stub_dir/blkid" "$disk_stub_dir/sfdisk" "$disk_stub_dir/partprobe" "$disk_stub_dir/udevadm" "$disk_stub_dir/mkfs.ext4" "$disk_stub_dir/mount"
+
+DISK_STUB_LOG="$disk_root/disk.log" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$disk_root"
+grep -q '^UUID=1111-2222 /home/agent ext4 defaults,nofail 0 2$' "$disk_root/etc/fstab"
+test -e "$disk_root/dev/sdb1"
+test -d "$disk_root/home/agent"
+grep -q '^sfdisk /tmp/.*/dev/sdb$' "$disk_root/disk.log"
+grep -q -- 'mkfs.ext4 -F /tmp/.*/dev/sdb1' "$disk_root/disk.log"
+grep -q '^mount /tmp/.*/home/agent$' "$disk_root/disk.log"
+
+set +e
+DISK_STUB_LOG="$disk_root/disk.log" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$disk_root" >"$disk_root/disk-existing.out" 2>"$disk_root/disk-existing.err"
+disk_existing_status=$?
+set -e
+test "$disk_existing_status" -eq 0
+grep -q 'already has an fstab entry' "$disk_root/disk-existing.out"
+test "$(grep -c '^UUID=1111-2222 /home/agent ext4 defaults,nofail 0 2$' "$disk_root/etc/fstab")" -eq 1
+
+: > "$disk_root/dev/sda"
+DISK_STUB_LOG="$disk_root/disk.log" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$disk_root" --device /dev/sda --mount-point /srv/data
+grep -q '^UUID=3333-4444 /srv/data ext4 defaults,nofail 0 2$' "$disk_root/etc/fstab"
+test -e "$disk_root/dev/sda1"
+grep -q '^sfdisk /tmp/.*/dev/sda$' "$disk_root/disk.log"
+
+mounted_root="$(mktemp -d)"
+mkdir -p "$mounted_root/etc" "$mounted_root/dev"
+: > "$mounted_root/etc/fstab"
+: > "$mounted_root/dev/sdb"
+cat > "$mounted_root/mounts" <<MOUNTS
+/dev/sdb1 /old ext4 rw 0 0
+MOUNTS
+set +e
+DISK_STUB_LOG="$mounted_root/disk.log" MOUNTS_FILE="$mounted_root/mounts" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$mounted_root" >"$mounted_root/disk-mounted.out" 2>"$mounted_root/disk-mounted.err"
+disk_mounted_status=$?
+set -e
+test "$disk_mounted_status" -ne 0
+grep -q 'already appears to be mounted' "$mounted_root/disk-mounted.err"
+test ! -e "$mounted_root/dev/sdb1"
+
+DISK_STUB_LOG="$mounted_root/disk.log" MOUNTS_FILE="$mounted_root/mounts" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$mounted_root" --force --mount-point /srv/forced
+grep -q '^UUID=1111-2222 /srv/forced ext4 defaults,nofail 0 2$' "$mounted_root/etc/fstab"
 
 echo "static and staged-root tests passed"
