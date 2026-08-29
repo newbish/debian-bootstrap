@@ -176,6 +176,7 @@ cat > "$disk_stub_dir/blkid" <<'STUB'
 case "$*" in
   *"-s UUID -o value /tmp"*sdb1) printf '1111-2222\n' ;;
   *"-s UUID -o value /tmp"*sda1) printf '3333-4444\n' ;;
+  *"-s UUID -o value /tmp"*sda2) printf 'ROOT-UUID\n' ;;
   *"-s UUID -o value /tmp"*) printf '\n' ;;
   *) printf 'unexpected blkid args: %s\n' "$*" >&2; exit 9 ;;
 esac
@@ -197,12 +198,24 @@ STUB
 cat > "$disk_stub_dir/mkfs.ext4" <<'STUB'
 #!/usr/bin/env bash
 printf 'mkfs.ext4 %s\n' "$*" >> "${DISK_STUB_LOG:?}"
+printf 'mke2fs 1.47.2\n'
+printf 'Discarding device blocks: done\n'
+printf 'Creating filesystem with fake blocks\n'
 STUB
 cat > "$disk_stub_dir/mount" <<'STUB'
 #!/usr/bin/env bash
 printf 'mount %s\n' "$*" >> "${DISK_STUB_LOG:?}"
 STUB
-chmod +x "$disk_stub_dir/lsblk" "$disk_stub_dir/blkid" "$disk_stub_dir/sfdisk" "$disk_stub_dir/partprobe" "$disk_stub_dir/udevadm" "$disk_stub_dir/mkfs.ext4" "$disk_stub_dir/mount"
+cat > "$disk_stub_dir/umount" <<'STUB'
+#!/usr/bin/env bash
+printf 'umount %s\n' "$*" >> "${DISK_STUB_LOG:?}"
+if [[ -f "${1:-}/existing.txt" ]]; then
+  printf 'copied-existing-data\n' >> "${DISK_STUB_LOG:?}"
+fi
+STUB
+chmod +x "$disk_stub_dir/lsblk" "$disk_stub_dir/blkid" "$disk_stub_dir/sfdisk" "$disk_stub_dir/partprobe" "$disk_stub_dir/udevadm" "$disk_stub_dir/mkfs.ext4" "$disk_stub_dir/mount" "$disk_stub_dir/umount"
+mkdir -p "$disk_root/home/agent"
+printf 'keep me\n' > "$disk_root/home/agent/existing.txt"
 
 DISK_STUB_LOG="$disk_root/disk.log" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$disk_root"
 grep -q '^UUID=1111-2222 /home/agent ext4 defaults,nofail 0 2$' "$disk_root/etc/fstab"
@@ -211,6 +224,7 @@ test -d "$disk_root/home/agent"
 grep -q '^sfdisk /tmp/.*/dev/sdb$' "$disk_root/disk.log"
 grep -q -- 'mkfs.ext4 -F /tmp/.*/dev/sdb1' "$disk_root/disk.log"
 grep -q '^mount /tmp/.*/home/agent$' "$disk_root/disk.log"
+grep -q '^copied-existing-data$' "$disk_root/disk.log"
 
 set +e
 DISK_STUB_LOG="$disk_root/disk.log" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$disk_root" >"$disk_root/disk-existing.out" 2>"$disk_root/disk-existing.err"
@@ -221,6 +235,18 @@ grep -q 'already has an fstab entry' "$disk_root/disk-existing.out"
 test "$(grep -c '^UUID=1111-2222 /home/agent ext4 defaults,nofail 0 2$' "$disk_root/etc/fstab")" -eq 1
 
 : > "$disk_root/dev/sda"
+: > "$disk_root/dev/sda2"
+printf 'UUID=ROOT-UUID / ext4 errors=remount-ro 0 1\n' >> "$disk_root/etc/fstab"
+set +e
+DISK_STUB_LOG="$disk_root/disk.log" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$disk_root" --device /dev/sda --mount-point /srv/data >"$disk_root/disk-fstab-root.out" 2>"$disk_root/disk-fstab-root.err"
+disk_fstab_root_status=$?
+set -e
+test "$disk_fstab_root_status" -ne 0
+grep -q 'UUID already has an fstab entry' "$disk_root/disk-fstab-root.err"
+rm -f "$disk_root/dev/sda2"
+grep -v '^UUID=ROOT-UUID ' "$disk_root/etc/fstab" > "$disk_root/etc/fstab.tmp"
+mv "$disk_root/etc/fstab.tmp" "$disk_root/etc/fstab"
+
 DISK_STUB_LOG="$disk_root/disk.log" PATH="$disk_stub_dir:$PATH" "$repo_root/bin/add-disk.sh" --target-root "$disk_root" --device /dev/sda --mount-point /srv/data
 grep -q '^UUID=3333-4444 /srv/data ext4 defaults,nofail 0 2$' "$disk_root/etc/fstab"
 test -e "$disk_root/dev/sda1"

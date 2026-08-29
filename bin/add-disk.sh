@@ -139,6 +139,76 @@ lsblk_has_mountpoint() {
   lsblk -nr -o MOUNTPOINT "$dev" 2>/dev/null | awk 'NF { found = 1 } END { exit found ? 0 : 1 }'
 }
 
+mount_point_has_data() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 1
+  find "$dir" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
+}
+
+copy_mount_point_contents() {
+  local part="$1" existing_dir="$2" temp_parent temp_mount
+  mount_point_has_data "$existing_dir" || return 0
+  require_command mount
+  require_command umount
+
+  temp_parent="$(in_target /tmp)"
+  mkdir -p "$temp_parent"
+  temp_mount="$(mktemp -d "$temp_parent/add-disk-copy.XXXXXX")"
+
+  echo "Copying existing contents from $MOUNT_POINT to the new filesystem before mounting." >&2
+  mount "$part" "$temp_mount"
+  cp -a "$existing_dir/." "$temp_mount/."
+  umount "$temp_mount"
+  rm -rf "$temp_mount"
+}
+
+existing_partition_paths() {
+  local dev_path="$1" pattern
+  case "$dev_path" in
+    *[0-9]) pattern="${dev_path}p*" ;;
+    *) pattern="${dev_path}[0-9]*" ;;
+  esac
+  compgen -G "$pattern" || true
+}
+
+fstab_name_for_path() {
+  local path="$1"
+  if [[ "$TARGET_ROOT" == "/" ]]; then
+    printf '%s' "$path"
+  else
+    printf '/%s' "${path#"$TARGET_ROOT/"}"
+  fi
+}
+
+check_existing_partition_references() {
+  local fstab_file="$1" part_path part_name part_uuid
+  while IFS= read -r part_path; do
+    [[ -n "$part_path" ]] || continue
+    part_name="$(fstab_name_for_path "$part_path")"
+    if fstab_has_value "$part_name" "$fstab_file"; then
+      echo "$part_name already has an fstab entry; refusing to rewrite $DEVICE without --force." >&2
+      exit 2
+    fi
+    part_uuid="$(blkid -s UUID -o value "$part_path" 2>/dev/null || true)"
+    if [[ -n "$part_uuid" ]] && fstab_has_value "UUID=$part_uuid" "$fstab_file"; then
+      echo "$part_name UUID already has an fstab entry; refusing to rewrite $DEVICE without --force." >&2
+      exit 2
+    fi
+  done < <(existing_partition_paths "$device_path")
+}
+
+existing_partition_mounted() {
+  local mounts_file="$1" part_path part_name
+  while IFS= read -r part_path; do
+    [[ -n "$part_path" ]] || continue
+    part_name="$(fstab_name_for_path "$part_path")"
+    if mounts_have_device "$part_name" "$mounts_file" || mounts_have_device "$part_path" "$mounts_file"; then
+      return 0
+    fi
+  done < <(existing_partition_paths "$device_path")
+  return 1
+}
+
 refresh_partition_table() {
   local dev="$1"
   if command -v partprobe >/dev/null 2>&1; then
@@ -172,11 +242,11 @@ format_partition_if_needed() {
   case "$FILESYSTEM" in
     ext4)
       require_command mkfs.ext4
-      mkfs.ext4 -F "$part"
+      mkfs.ext4 -F "$part" >&2
       ;;
     *)
       require_command "mkfs.$FILESYSTEM"
-      "mkfs.$FILESYSTEM" "$part"
+      "mkfs.$FILESYSTEM" "$part" >&2
       ;;
   esac
   printf '%s' "$FILESYSTEM"
@@ -216,6 +286,10 @@ main() {
     exit 0
   fi
 
+  if [[ "$FORCE" != "1" ]]; then
+    check_existing_partition_references "$fstab_file"
+  fi
+
   if [[ -e "$partition_path" ]]; then
     uuid="$(blkid -s UUID -o value "$partition_path" 2>/dev/null || true)"
     if [[ -n "$uuid" ]] && fstab_has_value "UUID=$uuid" "$fstab_file"; then
@@ -224,7 +298,7 @@ main() {
     fi
   fi
 
-  if { mounts_have_device "$DEVICE" "$mounts_file" || mounts_have_device "$partition" "$mounts_file" || lsblk_has_mountpoint "$device_path"; } && [[ "$FORCE" != "1" ]]; then
+  if { mounts_have_device "$DEVICE" "$mounts_file" || mounts_have_device "$partition" "$mounts_file" || existing_partition_mounted "$mounts_file" || lsblk_has_mountpoint "$device_path"; } && [[ "$FORCE" != "1" ]]; then
     echo "$DEVICE or one of its partitions already appears to be mounted; refusing to rewrite its partition table without --force." >&2
     exit 2
   fi
@@ -245,6 +319,8 @@ main() {
   fi
 
   mkdir -p "$mount_dir"
+  copy_mount_point_contents "$partition_path" "$mount_dir"
+
   source_spec="UUID=$uuid"
   printf '%s %s %s %s 0 2\n' "$source_spec" "$MOUNT_POINT" "$fs_type" "$FSTAB_OPTIONS" >> "$fstab_file"
 
